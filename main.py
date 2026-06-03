@@ -77,9 +77,17 @@ def root():
 # ── Sentiment ─────────────────────────────────────────────────────────────────
 class SentimentRequest(BaseModel):
     text: str
+    stars: int | None = None
 
-@app.post("/api/sentiment")
-def analyse_sentiment(body: SentimentRequest):
+def normalize_sentiment_label(label: str | None) -> str:
+    normalized = (label or "").lower()
+    if "pos" in normalized or normalized in {"label_2", "5 stars", "4 stars"}:
+        return "POS"
+    if "neg" in normalized or normalized in {"label_0", "1 star", "2 stars"}:
+        return "NEG"
+    return "NEU"
+
+def sentiment_payload(body: SentimentRequest):
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="text cannot be empty")
 
@@ -88,6 +96,10 @@ def analyse_sentiment(body: SentimentRequest):
             "ready": False,
             "label": None,
             "score": None,
+            "sentimentLabel": "NEU",
+            "sentimentScore": 0,
+            "mismatchFlag": False,
+            "fakeScore": 0,
             "scores": {},
             "message": "Sentiment model not loaded. Add files to models/petpal_roberta_model/"
         }
@@ -96,14 +108,29 @@ def analyse_sentiment(body: SentimentRequest):
         results = sentiment_pipeline(body.text.strip())[0]
         best    = max(results, key=lambda x: x["score"])
         scores  = {r["label"].lower(): round(r["score"], 4) for r in results}
+        sentiment_label = normalize_sentiment_label(best["label"])
+        sentiment_score = round(best["score"], 4)
+        mismatch_flag = bool(body.stars and ((body.stars >= 4 and sentiment_label == "NEG") or (body.stars <= 2 and sentiment_label == "POS")))
         return {
             "ready": True,
             "label": best["label"].lower(),
             "score": round(best["score"], 4),
+            "sentimentLabel": sentiment_label,
+            "sentimentScore": sentiment_score if sentiment_label == "POS" else -sentiment_score if sentiment_label == "NEG" else 0,
+            "mismatchFlag": mismatch_flag,
+            "fakeScore": 0.7 if mismatch_flag else 0,
             "scores": scores,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/sentiment")
+def analyse_sentiment(body: SentimentRequest):
+    return sentiment_payload(body)
+
+@app.post("/sentiment")
+def analyse_sentiment_compat(body: SentimentRequest):
+    return sentiment_payload(body)
 
 
 # ── Dog Match ─────────────────────────────────────────────────────────────────
