@@ -1,0 +1,9 @@
+models/
+__pycache__/
+*.pyc
+.env
+.env.local
+venv/
+.venv/
+node_modules/
+*.zip
