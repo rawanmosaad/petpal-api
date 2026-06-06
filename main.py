@@ -26,11 +26,14 @@ gallery_embeddings = None
 gallery_dog_ids    = None
 SENTIMENT_READY    = False
 DOG_READY          = False
+SENTIMENT_ERROR    = None
+DOG_ERROR          = None
 
 @app.on_event("startup")
 def load_models():
     global sentiment_pipeline, SENTIMENT_READY
     global dog_model, gallery_embeddings, gallery_dog_ids, DOG_READY
+    global SENTIMENT_ERROR, DOG_ERROR
 
     if os.path.isdir(SENTIMENT_MODEL_PATH):
         try:
@@ -44,11 +47,14 @@ def load_models():
     trust_remote_code=True,
 )
             SENTIMENT_READY = True
-            print("✅ Sentiment model loaded.")
+            SENTIMENT_ERROR = None
+            print("Sentiment model loaded.")
         except Exception as e:
-            print(f"⚠️  Sentiment model failed: {e}")
+            SENTIMENT_ERROR = str(e)
+            print(f"Sentiment model failed: {e}")
     else:
-        print("⏳ Sentiment model not found — add files to models/petpal_roberta_model/")
+        SENTIMENT_ERROR = "Sentiment model not found. Add files to models/petpal_roberta_model/"
+        print(SENTIMENT_ERROR)
 
     if os.path.exists(DOG_MODEL_PATH) and os.path.exists(GALLERY_PATH):
         try:
@@ -58,11 +64,19 @@ def load_models():
             gallery_embeddings = data["embeddings"]
             gallery_dog_ids    = data["dog_ids"]
             DOG_READY = True
-            print("✅ Dog face model loaded.")
+            DOG_ERROR = None
+            print("Dog face model loaded.")
         except Exception as e:
-            print(f"⚠️  Dog model failed: {e}")
+            DOG_ERROR = str(e)
+            print(f"Dog model failed: {e}")
     else:
-        print("⏳ Dog model not found — add files to models/")
+        missing = []
+        if not os.path.exists(DOG_MODEL_PATH):
+            missing.append("models/dog_face_embedding_model.keras")
+        if not os.path.exists(GALLERY_PATH):
+            missing.append("models/dog_gallery_index.npz")
+        DOG_ERROR = "Dog model not found. Missing: " + ", ".join(missing)
+        print(DOG_ERROR)
 
 
 @app.get("/")
@@ -71,6 +85,7 @@ def root():
         "status": "running",
         "sentiment_ready": SENTIMENT_READY,
         "dog_model_ready": DOG_READY,
+        "dog_model_error": DOG_ERROR,
     }
 
 
@@ -101,7 +116,7 @@ def sentiment_payload(body: SentimentRequest):
             "mismatchFlag": False,
             "fakeScore": 0,
             "scores": {},
-            "message": "Sentiment model not loaded. Add files to models/petpal_roberta_model/"
+            "message": SENTIMENT_ERROR or "Sentiment model not loaded."
         }
 
     try:
@@ -143,7 +158,7 @@ async def dog_match(file: UploadFile = File(...), threshold: float = 0.75):
             "ready": False,
             "matched": False,
             "results": [],
-            "message": "Dog model not loaded. Add files to models/"
+            "message": DOG_ERROR or "Dog model not loaded."
         }
 
     if not file.content_type.startswith("image/"):
